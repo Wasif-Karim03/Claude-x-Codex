@@ -4,6 +4,10 @@
 
 It's fully automatic. A router agent reads the task and the repo, then picks which model plans, reviews, builds and inspects, and at what effort. A Python checker validates that choice. The coordinator (your Claude Code session) runs every stage on the model the route names, and an audit proves afterwards that each stage really ran on that model.
 
+[![Watch the 25-second demo](assets/brag.jpg)](assets/brag.mp4)
+
+*25-second demo (click to play). It uses real route and audit output from a test run.*
+
 ```
 /team add a --stats-only flag to the CLI and golden tests for it
 /team build with sol: make input streaming with byte-identical output
