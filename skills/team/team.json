@@ -1,0 +1,161 @@
+{
+  "_note": "Role -> model map for /team. The team-router picks per task from 'roster'; the fixed role maps below are the fallback if routing fails. Edit freely. Dated defaults: 2026-10-16.",
+  "planner": {
+    "provider": "claude",
+    "agent": "team-planner",
+    "model": "fable"
+  },
+  "plan_reviewer": {
+    "provider": "codex",
+    "model": "gpt-6-astra",
+    "effort": "high"
+  },
+  "builders": {
+    "claude": {
+      "provider": "claude",
+      "agent": "team-builder",
+      "model": "opus"
+    },
+    "codex": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "medium"
+    }
+  },
+  "inspectors": {
+    "codex": {
+      "provider": "codex",
+      "model": "gpt-6-astra",
+      "effort": "high",
+      "_when": "Claude built"
+    },
+    "claude": {
+      "provider": "claude",
+      "model": "claude-fable-5-1",
+      "effort": "high",
+      "_when": "Codex built"
+    }
+  },
+  "grunts": {
+    "claude": {
+      "provider": "claude",
+      "agent": "team-grunt",
+      "model": "haiku"
+    },
+    "codex": {
+      "provider": "codex",
+      "model": "gpt-6-luna",
+      "effort": "low"
+    }
+  },
+  "debugger": {
+    "codex": {
+      "model": "gpt-6-astra",
+      "effort": "high",
+      "_when": "Claude is stuck"
+    },
+    "claude": {
+      "model": "claude-fable-5-1",
+      "_when": "Codex is stuck"
+    }
+  },
+  "budgets": {
+    "plan_review_rounds": 3,
+    "fix_rounds": 2,
+    "timeout_seconds": 900,
+    "max_new_tokens": {
+      "fast": 200000,
+      "standard": 600000,
+      "heavy": 1200000,
+      "_note": "Uncached input tokens summed over all stages (not the coordinator). Measured 2026-10-16: fast ~85K, standard 150-305K, heavy ~495K."
+    }
+  },
+  "runs_dir": "~/.claude/team-runs",
+  "routing": {
+    "mode": "auto",
+    "router_model": "sonnet",
+    "_modes": "auto = team-router decides per task; fixed = use the role maps below",
+    "fast_path": {
+      "_when": "Coordinator skips the router: user said 'fast', or the task is an obvious edit of about 20 lines or fewer in files it names, with no design choices.",
+      "routed_by": "fast_path",
+      "lane": "fast",
+      "summary": "fast path: tiny, obvious change; router skipped",
+      "stages": {
+        "plan": {
+          "by": "coordinator"
+        },
+        "plan_review": {
+          "skip": true
+        },
+        "build": {
+          "provider": "claude",
+          "model": "haiku",
+          "reason": "fast path: tiny, fully specified edit"
+        },
+        "inspect": {
+          "provider": "codex",
+          "model": "gpt-6-astra",
+          "effort": "medium",
+          "reason": "fast path: other company inspects"
+        }
+      },
+      "grunt_tasks": [],
+      "budgets": {
+        "plan_review_rounds": 0,
+        "fix_rounds": 1
+      },
+      "proof_hint": ""
+    }
+  },
+  "roster": {
+    "claude": {
+      "fable": {
+        "id": "claude-fable-5-1",
+        "agent_model": "fable",
+        "cost": "$$$$",
+        "good_for": "hardest, ambiguous or long-horizon planning; deep independent inspection"
+      },
+      "opus": {
+        "id": "claude-opus-5-5",
+        "agent_model": "opus",
+        "cost": "$$",
+        "good_for": "strong default builder; planning of normal features; solid inspection"
+      },
+      "sonnet": {
+        "id": "claude-sonnet-5-5",
+        "agent_model": "sonnet",
+        "cost": "$",
+        "good_for": "well-specified everyday coding; small plans"
+      },
+      "haiku": {
+        "id": "claude-haiku-5-5",
+        "agent_model": "haiku",
+        "cost": "\u00a2",
+        "good_for": "mechanical subtasks only (fixtures, renames, docs); prompts over 100K tokens cost 5x"
+      }
+    },
+    "codex": {
+      "gpt-6-astra": {
+        "id": "gpt-6-astra",
+        "cost": "$$$",
+        "good_for": "hard reviews, difficult debugging, independent inspection"
+      },
+      "gpt-6.1-sol": {
+        "id": "gpt-6.1-sol",
+        "cost": "$$",
+        "good_for": "bounded backend/logic/refactor builds with ordinary test commands"
+      },
+      "gpt-6-luna": {
+        "id": "gpt-6-luna",
+        "cost": "$",
+        "good_for": "narrow repetitive tasks with explicit checks"
+      }
+    },
+    "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+    ]
+  }
+}
