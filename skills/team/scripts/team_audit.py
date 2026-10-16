@@ -103,8 +103,9 @@ def transcript_usage(path, start=None, end=None):
 
 
 def load_subagents(projects_dir):
-    agents = []
-    for f in glob.glob(os.path.join(projects_dir, "*", "*", "subagents", "agent-*.jsonl")):
+    by_id = {}
+    for f in sorted(glob.glob(os.path.join(projects_dir, "*", "*", "subagents", "agent-*.jsonl")),
+                    key=os.path.getmtime):
         meta = load_json(f[:-len(".jsonl")] + ".meta.json") or {}
         models, tools, prompt, final, ts = set(), set(), None, None, None
         with open(f, encoding="utf-8", errors="replace") as fh:
@@ -127,10 +128,15 @@ def load_subagents(projects_dir):
                             tools.add(c.get("name"))
                         elif c.get("type") == "text" and c.get("text", "").strip():
                             final = c["text"]
-        agents.append({"file": f, "type": meta.get("agentType"), "models": sorted(models),
+        aid = os.path.basename(f)
+        if aid in by_id:
+            # A resumed host session copies subagent transcripts into its own dir; count once.
+            by_id[aid]["copies"].append(f)
+            continue
+        by_id[aid] = {"file": f, "copies": [f], "type": meta.get("agentType"), "models": sorted(models),
                        "tokens": transcript_usage(f),
-                       "tools": tools, "prompt": prompt or "", "final": final or "", "ts": ts or ""})
-    return sorted(agents, key=lambda a: a["ts"])
+                       "tools": tools, "prompt": prompt or "", "final": final or "", "ts": ts or ""}
+    return sorted(by_id.values(), key=lambda a: a["ts"])
 
 
 def words(text):
@@ -148,6 +154,11 @@ def first_line(text):
         if line.strip():
             return line.strip()
     return None
+
+
+def head_key(text):
+    line = first_line(text)
+    return " ".join(re.findall(r"[a-z0-9]+", line.lower())) if line else None
 
 
 def router_task(agent):
@@ -180,10 +191,10 @@ def agents_for_run(run, route, agents):
     mine = [a for a in agents if path in a["prompt"]]
     run_text = " ".join(p.read_text(encoding="utf-8", errors="replace")
                         for p in list(run.glob("plan*.md")) + [run / "log.md"] if p.exists())
-    plan_heads = {first_line(p.read_text(encoding="utf-8", errors="replace"))
+    plan_heads = {head_key(p.read_text(encoding="utf-8", errors="replace"))
                   for p in run.glob("plan*.md")} - {None}
     for a in agents:
-        if a not in mine and a["type"] == "team-planner" and first_line(a["final"]) in plan_heads:
+        if a not in mine and a["type"] == "team-planner" and head_key(a["final"]) in plan_heads:
             mine.append(a)
     keys = {task_key(a["prompt"]) for a in mine if a["type"] == "team-planner"} - {None}
     routers = [a for a in agents if a["type"] == "team-router" and task_key(a["prompt"]) in keys]
@@ -191,13 +202,22 @@ def agents_for_run(run, route, agents):
         routers = []
     elif not routers:
         born = run_started(run)
+        sig = route_signature(route.get("stages"), route.get("grunt_tasks"))
+        same = [a for a in agents if a["type"] == "team-router" and a["ts"] >= born
+                and route_signature(*[(router_route(a) or {}).get(k) for k in ("stages", "grunt_tasks")]) == sig]
+        if same:
+            routers = same[:1]  # the first one after the run dir was created
+    if not routers and route.get("routed_by") != "fast_path":
+        born = run_started(run)
         scored = [(overlap(router_task(a), run_text), a) for a in agents
                   if a["type"] == "team-router" and a["ts"] >= born]
         scored = [x for x in scored if x[0] >= 0.6]
         if scored:
             routers = [max(scored, key=lambda x: x[0])[1]]
+    keys |= {task_key(a["prompt"]) for a in routers} - {None}
     for a in agents:
-        if a["type"] == "team-planner" and a not in mine and keys and task_key(a["prompt"]) in keys:
+        if (a["type"] == "team-planner" and a not in mine and keys and task_key(a["prompt"]) in keys
+                and a["ts"] >= run_started(run)):
             mine.append(a)
     for g in route.get("grunt_tasks", []):
         scored = [(overlap(g.get("task"), a["prompt"]), a) for a in agents
@@ -382,7 +402,7 @@ def coordinator_row(run, agents):
     agents = [a for a in agents if a["ts"] and a["ts"] >= born]
     if not agents:
         return None
-    sessions = {str(Path(a["file"]).parent.parent) + ".jsonl" for a in agents}
+    sessions = {str(Path(f).parent.parent) + ".jsonl" for a in agents for f in a.get("copies", [a["file"]])}
     sessions = {s for s in sessions if os.path.exists(s)}
     if not sessions:
         return None

@@ -219,6 +219,41 @@ class AuditTest(unittest.TestCase):
         self.assertEqual(routers, [])
         self.assertIsNone(ta.coordinator_row(self.run, [old]))
 
+    def test_router_matched_by_route_when_task_text_differs(self):
+        # The coordinator paraphrased the task in its log and reworded the plan heading.
+        (self.run / "log.md").write_text("task: something phrased entirely differently\n")
+        (self.run / "plan.md").write_text("# Plan \u2014 Widget Flag\nsteps\n")
+        router, planner = self.agents[0], self.agents[1]
+        planner["final"] = "# plan: widget flag"
+        routers, mine = ta.agents_for_run(self.run, ROUTE, self.agents)
+        self.assertEqual(routers, [router])
+        self.assertIn(planner, mine)
+        self.assertNotIn(("route", "MISSING"), self.statuses())
+        self.assertNotIn(("plan", "MISSING"), self.statuses())
+
+    def test_router_with_other_route_is_not_matched(self):
+        (self.run / "log.md").write_text("task: something phrased entirely differently\n")
+        other = json.loads(json.dumps(ROUTE))
+        other["stages"]["build"]["model"] = "gpt-6-astra"
+        self.agents[0]["final"] = json.dumps(other)
+        self.agents[1]["final"] = "# unrelated heading"
+        routers, _ = ta.agents_for_run(self.run, ROUTE, self.agents)
+        self.assertEqual(routers, [])
+
+    def test_copied_transcripts_count_once(self):
+        proj = Path(self.tmp.name) / "projects" / "p"
+        line = json.dumps({"timestamp": "2026-01-01T00:00:00", "message": {
+            "id": "m1", "role": "assistant", "model": "claude-opus-5-5", "content": [],
+            "usage": {"input_tokens": 5, "output_tokens": 1}}})
+        for sess in ("s1", "s2"):  # a resumed session copies subagents/ into its own dir
+            d = proj / sess / "subagents"
+            d.mkdir(parents=True)
+            (d / "agent-abc.jsonl").write_text(line)
+            (d / "agent-abc.meta.json").write_text(json.dumps({"agentType": "team-builder"}))
+        agents = ta.load_subagents(str(proj.parent))
+        self.assertEqual(len(agents), 1)
+        self.assertEqual(len(agents[0]["copies"]), 2)
+
     def test_routing_only_run_is_skipped(self):
         (self.run / "route.ok.json").unlink()
         self.assertIn("skipped", ta.audit_run(self.run, self.agents))
